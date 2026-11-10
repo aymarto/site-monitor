@@ -17,4 +17,4 @@ La liste des sites n'apparaît ni dans le code, ni dans les journaux, ni dans `s
 
 ## Tester
 
-Actions → « Surveillance des sites » → Run workflow → mode `test` : envoie un message WhatsApp de test.
+Actions → « Surveillance des sites » → Run workflow → mode `test`, ou modifier le fichier `TEST_WHATSAPP` : envoie un message WhatsApp de test.

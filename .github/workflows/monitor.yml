@@ -3,6 +3,8 @@ name: Surveillance des sites
 on:
   schedule:
     - cron: "*/5 * * * *"   # toutes les 5 minutes (GitHub peut décaler de quelques minutes)
+  push:
+    paths: [TEST_WHATSAPP]  # modifier ce fichier envoie un message WhatsApp de test
   workflow_dispatch:
     inputs:
       mode:
@@ -34,7 +36,7 @@ jobs:
           SITES: ${{ secrets.SITES }}
           CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
           CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
-          MODE: ${{ github.event.inputs.mode || 'check' }}
+          MODE: ${{ github.event.inputs.mode || (github.event_name == 'push' && 'test') || 'check' }}
         run: python monitor.py
 
       - name: Enregistrer l'état
