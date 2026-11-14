@@ -1,0 +1,35 @@
+name: Bilan hebdomadaire
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"   # lundi 8 h à Paris en hiver (9 h en été) ; GitHub peut décaler un peu
+  push:
+    paths: [TEST_WEEKLY]  # modifier ce fichier envoie un bilan tout de suite
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dépendances (Search Console)
+        run: pip install --quiet google-auth requests
+
+      - name: Bilan
+        env:
+          SITES: ${{ secrets.SITES }}
+          CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
+          CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+          AUDIT_URL: ${{ secrets.AUDIT_URL }}
+          AUDIT_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+          GSC_SERVICE_ACCOUNT_JSON: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON }}
+        run: python weekly.py

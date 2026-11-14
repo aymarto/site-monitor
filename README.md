@@ -1,20 +1,22 @@
 # site-monitor
 
-Vérifie des sites web toutes les 5 minutes (GitHub Actions) et envoie une alerte WhatsApp
-(via [CallMeBot](https://www.callmebot.com/blog/free-api-whatsapp-messages/)) en cas de panne,
-un rappel toutes les heures tant qu'elle dure, puis un message quand le site est rétabli.
-Un message de contrôle « surveillance active » part chaque lundi matin.
+Surveillance gratuite (sans IA) de sites web, avec alertes WhatsApp via [CallMeBot](https://www.callmebot.com/blog/free-api-whatsapp-messages/).
+
+- **Pannes** (`monitor.yml`, toutes les 5 min) : site injoignable → alerte, rappel toutes les heures, message au rétablissement.
+- **Sécurité, contrôle extérieur** (même workflow) : lit le rapport de sécurité publié par le serveur ; rapport absent, périmé ou anomalie critique → alerte (rappel toutes les 12 h).
+- **Bilan du lundi** (`weekly.yml`) : SEO technique, Google Search Console (7 j vs 7 j), versions Next.js/React, sécurité du serveur.
 
 ## Secrets (Settings → Secrets and variables → Actions)
 
 | Secret | Contenu |
 |---|---|
 | `SITES` | une ligne par site : `Nom\|https://adresse` |
-| `CALLMEBOT_PHONE` | numéro au format international, ex. `+33612345678` |
-| `CALLMEBOT_APIKEY` | clé envoyée par CallMeBot |
+| `CALLMEBOT_PHONE` / `CALLMEBOT_APIKEY` | numéro WhatsApp international et clé CallMeBot |
+| `AUDIT_URL` / `AUDIT_TOKEN` | adresse du rapport de sécurité du serveur et jeton d'accès |
+| `GSC_SERVICE_ACCOUNT_JSON` | clé JSON (une ligne) d'un compte de service ajouté en lecture aux propriétés Search Console |
 
-La liste des sites n'apparaît ni dans le code, ni dans les journaux, ni dans `state.json`.
+Aucune adresse ni aucun secret n'apparaît dans le code, les journaux ou `state.json`.
 
 ## Tester
 
-Actions → « Surveillance des sites » → Run workflow → mode `test`, ou modifier le fichier `TEST_WHATSAPP` : envoie un message WhatsApp de test.
+Modifier `TEST_WHATSAPP` (message de test) ou `TEST_WEEKLY` (bilan immédiat), ou Actions → Run workflow.

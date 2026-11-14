@@ -121,6 +121,53 @@ def minutes_between(a, b):
     return int((b - a).total_seconds() // 60)
 
 
+def fetch_security_report():
+    """Rapport JSON du serveur (secrets AUDIT_URL + AUDIT_TOKEN). Retourne (rapport, erreur)."""
+    url, token = os.environ.get("AUDIT_URL", "").strip(), os.environ.get("AUDIT_TOKEN", "").strip()
+    if not url or not token:
+        return None, None
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "X-Audit-Token": token})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            return json.loads(resp.read().decode("utf-8")), None
+    except Exception as e:  # noqa: BLE001
+        return None, f"rapport de sécurité inaccessible ({type(e).__name__})"
+
+
+def check_security(state, t):
+    """Alerte sur les anomalies critiques du rapport serveur : à l'apparition, rappel toutes les 12 h, à la résolution."""
+    import audit_rules
+
+    report, err = fetch_security_report()
+    if report is None and err is None:
+        return []  # contrôle non configuré
+    found = {}
+    if err:
+        found["unreachable"] = err.capitalize() + " : le serveur ne publie plus son contrôle."
+    else:
+        for k, level, msg in audit_rules.evaluate(report, t):
+            if level == "critique":
+                found[key(k)] = msg  # identifiant haché : rien de lisible dans state.json (dépôt public)
+    sec = state.setdefault("security", {})
+    new = [k for k in found if k not in sec]
+    remind = [k for k in found if k in sec and minutes_between(datetime.fromisoformat(sec[k]), t) >= 720]
+    resolved = [k for k in sec if k not in found]
+    for k in new + remind:
+        sec[k] = t.isoformat()
+    for k in resolved:
+        del sec[k]
+    print(f"sécurité : {len(found)} anomalie(s) critique(s), {len(new)} nouvelle(s), {len(resolved)} résolue(s)")
+    out = []
+    if new or remind:
+        out.append(f"🚨 ALERTE SÉCURITÉ SERVEUR ({fmt(t)}) — contrôle extérieur")
+        out += [f"• {found[k]}" for k in new]
+        out += [f"• (toujours actif) {found[k]}" for k in remind]
+        out.append("Réagis vite : demande à Claude d'analyser le serveur.")
+    if resolved:
+        out.append(f"✅ {len(resolved)} anomalie(s) de sécurité résolue(s) sur le serveur.")
+    return out
+
+
 def main():
     sites = parse_sites(os.environ.get("SITES", ""))
     mode = os.environ.get("MODE", "check")
@@ -193,13 +240,13 @@ def main():
         parts.append(f"Rétablissement ({fmt(t)}) :")
         parts += up_msgs
 
-    # Message hebdomadaire (lundi 9h-9h10, heure de Paris) : preuve que la surveillance tourne
-    local = t.astimezone(TZ)
-    week = local.strftime("%G-W%V")
-    if local.weekday() == 0 and local.hour == 9 and state.get("heartbeat") != week:
-        state["heartbeat"] = week
-        if not parts:
-            parts.append(f"🟢 Surveillance active : {len(sites)} site(s) en ligne. Bonne semaine !")
+    # Contrôle extérieur du rapport de sécurité du serveur (si le serveur entier n'est pas déjà signalé en panne)
+    if len(down_names) < len(sites):
+        sec = check_security(state, t)
+        if sec:
+            if parts:
+                parts.append("")
+            parts += sec
 
     if parts:
         send_whatsapp("\n".join(parts))

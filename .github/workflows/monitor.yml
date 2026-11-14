@@ -36,6 +36,8 @@ jobs:
           SITES: ${{ secrets.SITES }}
           CALLMEBOT_PHONE: ${{ secrets.CALLMEBOT_PHONE }}
           CALLMEBOT_APIKEY: ${{ secrets.CALLMEBOT_APIKEY }}
+          AUDIT_URL: ${{ secrets.AUDIT_URL }}
+          AUDIT_TOKEN: ${{ secrets.AUDIT_TOKEN }}
           MODE: ${{ github.event.inputs.mode || (github.event_name == 'push' && 'test') || 'check' }}
         run: python monitor.py
 
