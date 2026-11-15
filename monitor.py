@@ -79,12 +79,26 @@ def check_with_retry(url):
     return ok, detail
 
 
-def send_whatsapp(text):
-    phone = os.environ.get("CALLMEBOT_PHONE", "").strip()
-    apikey = os.environ.get("CALLMEBOT_APIKEY", "").strip()
-    if not phone or not apikey:
-        print("CallMeBot non configuré : message non envoyé.")
-        return False
+MAX_CHUNK = 700  # CallMeBot tronque les messages trop longs : on découpe par lignes
+
+
+def chunks(text):
+    parts, cur = [], ""
+    for line in text.split("\n"):
+        line = line[:MAX_CHUNK]
+        if cur and len(cur) + len(line) + 1 > MAX_CHUNK:
+            parts.append(cur)
+            cur = line
+        else:
+            cur = f"{cur}\n{line}" if cur else line
+    if cur:
+        parts.append(cur)
+    if len(parts) > 1:
+        parts = [f"({i}/{len(parts)}) {p}" for i, p in enumerate(parts, 1)]
+    return parts
+
+
+def send_one(text, phone, apikey):
     qs = urllib.parse.urlencode({"phone": phone, "text": text, "apikey": apikey})
     req = urllib.request.Request(
         f"https://api.callmebot.com/whatsapp.php?{qs}", headers={"User-Agent": USER_AGENT}
@@ -92,15 +106,31 @@ def send_whatsapp(text):
     for attempt in range(3):
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
-                body = resp.read().decode("utf-8", "replace")
-                if resp.status == 200 and "ERROR" not in body.upper():
-                    print("Message WhatsApp envoyé.")
+                body = resp.read().decode("utf-8", "replace").lower()
+                if resp.status == 200 and "invalid" not in body and "error" not in body:
                     return True
-                print(f"CallMeBot a répondu HTTP {resp.status}.")
-        except Exception as e:
+                # Réponse explicite de CallMeBot (clé invalide, etc.) : réessayer ne servirait à rien
+                print(f"CallMeBot a refusé le message (HTTP {resp.status}).")
+                return False
+        except Exception as e:  # réseau, délai, erreur serveur : on réessaie
             print(f"Échec d'envoi WhatsApp ({type(e).__name__}), essai {attempt + 1}/3.")
         time.sleep(10)
     return False
+
+
+def send_whatsapp(text):
+    phone = os.environ.get("CALLMEBOT_PHONE", "").strip()
+    apikey = os.environ.get("CALLMEBOT_APIKEY", "").strip()
+    if not phone or not apikey:
+        print("CallMeBot non configuré : message non envoyé.")
+        return False
+    ok = True
+    for i, part in enumerate(chunks(text)):
+        if i:
+            time.sleep(8)  # CallMeBot limite le débit : on espace les envois
+        ok = send_one(part, phone, apikey) and ok
+    print("Message WhatsApp envoyé." if ok else "Au moins une partie du message n'a pas été envoyée.")
+    return ok
 
 
 def load_state():
@@ -123,13 +153,21 @@ def minutes_between(a, b):
 
 def fetch_security_report():
     """Rapport JSON du serveur (secrets AUDIT_URL + AUDIT_TOKEN). Retourne (rapport, erreur)."""
-    url, token = os.environ.get("AUDIT_URL", "").strip(), os.environ.get("AUDIT_TOKEN", "").strip()
+    def clean(name):
+        # Tolère un collage maladroit : espaces, guillemets ou « NOM= » devant la valeur
+        v = os.environ.get(name, "").strip().strip('"').strip("'").strip()
+        return v.split("=", 1)[1].strip() if v.upper().startswith(name + "=") else v
+
+    url, token = clean("AUDIT_URL"), clean("AUDIT_TOKEN")
     if not url or not token:
         return None, None
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "X-Audit-Token": token})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             return json.loads(resp.read().decode("utf-8")), None
+    except urllib.error.HTTPError as e:
+        hint = " : jeton AUDIT_TOKEN ou adresse AUDIT_URL incorrects" if e.code == 404 else ""
+        return None, f"rapport de sécurité inaccessible (HTTP {e.code}{hint})"
     except Exception as e:  # noqa: BLE001
         return None, f"rapport de sécurité inaccessible ({type(e).__name__})"
 

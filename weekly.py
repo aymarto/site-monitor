@@ -88,7 +88,7 @@ def seo_site(name, url):
         return [("critique", f"accueil en erreur ({code or 'injoignable'})")], secs
     if secs > 1.5:
         issues.append(("attention", f"accueil lent ({secs:.1f} s)"))
-    if not host.startswith("www."):
+    if not host.startswith("www.") and host.count(".") == 1:
         c, h, *_ = get(f"https://www.{host}/", follow=False)
         if c not in (301, 308) or norm(h.get("Location")) != norm(f"https://{host}"):
             issues.append(("attention", f"www. ne redirige pas en 301 vers le domaine ({c})"))
@@ -104,7 +104,8 @@ def seo_site(name, url):
     else:
         if f'xmlns="{SITEMAP_NS}"' not in sm:
             issues.append(("critique", "sitemap.xml : namespace invalide (refusé par Google)"))
-        pages = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", sm)[:MAX_PAGES] or [url]
+        locs = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", sm)
+        pages = [u for u in locs if not re.search(r"\.(pdf|jpe?g|png|webp|gif|mp4|zip)$", u, re.I)][:MAX_PAGES] or [url]
     titles = {}
     for p in pages:
         c, _, html, *_ = get(p)
@@ -216,35 +217,41 @@ def main():
             if rct and info.get("react") and info["react"] != rct:
                 warn.append(f"{app} : React {info['react']} (dernière : {rct})")
 
+    # Search Console : détermine aussi les sites concernés par le SEO (ceux suivis dans la Search Console)
+    gsc_lines = []
+    seo_sites = sites
+    try:
+        token = gsc_token()
+    except Exception as e:  # noqa: BLE001
+        token = None
+        gsc_lines.append(f"indisponible ({type(e).__name__} : clé GSC_SERVICE_ACCOUNT_JSON illisible ?)")
+    if token:
+        seo_sites = []
+        for name, url in sites:
+            g = gsc_site(token, url)
+            if "error" in g:
+                print("Search Console : un site non suivi ou inaccessible")
+                continue  # site absent de la Search Console (application, page d'attente, autre compte)
+            seo_sites.append((name, url))
+            gsc_lines.append(f"{name} : {g['clicks']} clics{delta(g['clicks'], g['clicks_prev'])}, "
+                             f"{g['impr']} impressions{delta(g['impr'], g['impr_prev'])}")
+            if g["sitemap_errors"]:
+                warn.append(f"{name} : {g['sitemap_errors']} erreur(s) de sitemap dans Search Console")
+        if not seo_sites:
+            gsc_lines.append("aucun site accessible : le compte de service a-t-il été ajouté aux propriétés ?")
+            seo_sites = sites
+    elif not gsc_lines:
+        gsc_lines.append("non configurée (secret GSC_SERVICE_ACCOUNT_JSON absent)")
+
     # SEO
-    for name, url in sites:
+    for name, url in seo_sites:
         issues, _ = seo_site(name, url)
         c = [i for lvl, i in issues if lvl == "critique"]
         w = [i for lvl, i in issues if lvl == "attention"]
         crit += [f"{name} : {i}" for i in c]
         if w:
-            warn.append(f"{name} : {len(w)} point(s) SEO — " + " ; ".join(w[:2]))
+            warn.append(f"{name} : {len(w)} point(s) SEO, ex. {w[0]}")
         print(f"SEO site : {len(c)} critique(s), {len(w)} attention(s)")
-
-    # Search Console
-    gsc_lines = []
-    try:
-        token = gsc_token()
-    except Exception as e:  # noqa: BLE001
-        token = None
-        gsc_lines.append(f"Search Console indisponible ({type(e).__name__})")
-    if token:
-        for name, url in sites:
-            g = gsc_site(token, url)
-            if "error" in g:
-                gsc_lines.append(f"{name} : {g['error']}")
-                continue
-            gsc_lines.append(f"{name} : {g['clicks']} clics{delta(g['clicks'], g['clicks_prev'])}, "
-                             f"{g['impr']} impressions{delta(g['impr'], g['impr_prev'])}")
-            if g["sitemap_errors"]:
-                warn.append(f"{name} : {g['sitemap_errors']} erreur(s) de sitemap dans Search Console")
-    elif not gsc_lines:
-        gsc_lines.append("Search Console non configurée (secret GSC_SERVICE_ACCOUNT_JSON absent)")
 
     head = "🚨 SÉCURITÉ" if crit else ("⚠️ À voir" if warn else "✅ Tout va bien")
     lines.append(f"{head} — bilan hebdo des sites ({t.astimezone(__import__('monitor').TZ).strftime('%d/%m')})")
@@ -258,7 +265,7 @@ def main():
         lines.insert(1, f"Sécurité OK, {len(sites)} sites en ligne, SEO conforme.")
     text = "\n".join(lines)
     print(f"Bilan : {len(crit)} critique(s), {len(warn)} attention(s), {len(text)} caractères.")
-    send_whatsapp(text[:1900])
+    send_whatsapp(text)  # découpé automatiquement en plusieurs messages si besoin
 
 
 if __name__ == "__main__":
