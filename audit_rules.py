@@ -6,10 +6,15 @@ Utilisé à deux endroits :
 Chaque anomalie a un identifiant stable (pour n'alerter qu'une fois) et une gravité : "critique" ou "attention".
 """
 
+import re
 from datetime import datetime, timezone
 
 EXPECTED = {
-    "login_users": {"root", "ubuntu"},
+    "login_users": {"root", "ubuntu", "mary"},
+    # Seul compte autorisé à se connecter par mot de passe (sans droits administrateur)
+    "password_users": {"mary"},
+    # Personne dans les groupes sudo/admin : ubuntu passe par /etc/sudoers.d (clé SSH uniquement)
+    "admin_group_members": set(),
     "crontabs": {"ubuntu"},
     "cron_d": {"certbot", "e2scrub_all"},
     "sudoers_d": {"90-cloud-init-users", "README"},
@@ -55,6 +60,11 @@ def evaluate(report, now=None):
         add("ssh-password", "critique", "La connexion SSH par mot de passe a été réactivée.")
     if ssh.get("permitrootlogin") != "no":
         add("ssh-root", "critique", "La connexion SSH en root a été réautorisée.")
+    for user, val in (report.get("ssh_password_per_user") or {}).items():
+        if val == "yes" and user not in EXPECTED["password_users"]:
+            add(f"ssh-password-user:{user}", "critique", f"Connexion par mot de passe autorisée pour le compte « {user} ».")
+    for member in sorted(set(report.get("admin_group_members") or []) - EXPECTED["admin_group_members"]):
+        add(f"admin-group:{member}", "critique", f"Le compte « {member} » a été ajouté aux administrateurs (sudo).")
 
     for f in report.get("exec_files_in_tmp") or []:
         add(f"tmp-exec:{f}", "critique", f"Fichier exécutable suspect : {f}")
@@ -73,8 +83,9 @@ def evaluate(report, now=None):
             add(f"sshkey:{home}:{c}", "critique", f"Clé SSH inconnue sur {home} : {c}")
 
     for line in report.get("ssh_logins_7d") or []:
-        if "Accepted password" in line:
-            add("ssh-login-password", "critique", f"Connexion SSH par mot de passe : {line.strip()}")
+        m = re.search(r"Accepted (password|keyboard-interactive\S*) for (\S+)", line)
+        if m and m.group(2) not in EXPECTED["password_users"]:
+            add(f"ssh-login-password:{m.group(2)}", "critique", f"Connexion SSH par mot de passe : {line.strip()}")
 
     for line in report.get("listening_ports") or []:
         try:
